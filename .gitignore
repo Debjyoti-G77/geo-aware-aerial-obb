@@ -1,0 +1,27 @@
+# Weights & datasets (host via Releases / externally)
+*.pt
+*.onnx
+*.engine
+datasets/
+DOTA-v2.0/
+test_images/
+
+# Run outputs
+runs/
+.tmp/
+outputs/
+results/gpu/
+results/edge_study/
+results/charts/
+results/edge_charts/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

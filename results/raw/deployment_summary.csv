@@ -1,0 +1,4 @@
+label,images,avg_lat_ms,min_lat_ms,max_lat_ms,fps,avg_ram_mb,peak_ram_mb,total_dets,real_time
+"ONNX CPU (Pi 5 sim, 1024px)",469,283.6,230.8,575.5,3.53,721.5,722.0,27973,NO
+"ONNX GPU (Jetson Orin sim, 1024px)",469,32.5,22.4,99.8,30.74,999.9,1000.1,27962,YES
+"PyTorch GPU (RTX 3060, 1024px FP16)",469,126.5,24.5,640.3,7.91,0,0,31990,NO

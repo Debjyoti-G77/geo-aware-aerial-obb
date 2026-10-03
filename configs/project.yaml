@@ -1,0 +1,25 @@
+project:
+  name: geo-aware-aerial-obb
+
+paths:
+  dataset_root: datasets
+  train_yaml: src/dota2_obb.yaml
+  model: best.pt
+  output_root: outputs
+  temp_root: .tmp
+
+runtime:
+  device: cpu
+  workers: 4
+  image_size: 1024
+  batch_size: 1
+
+inference:
+  confidence: 0.25
+  iou: 0.45
+  # Initial engineering default; not tuned against RarePlanes ground truth.
+  global_nms_iou: 0.50
+
+tiling:
+  tile_size: 1024
+  overlap: 0.2

@@ -1,0 +1,89 @@
+# Frozen first RarePlanes one-class OBB fine-tuning experiment.
+experiment:
+  name: rareplanes_baseline_01_full
+  seed: 20261001
+  output_dir: outputs/training/rareplanes_baseline_01_full
+
+framework:
+  ultralytics_version: 8.4.165
+
+model:
+  path: best.pt
+  sha256: 5102e1493e3d1f2d0bb331d246e060badb1709f405cd17cd4a558cac9faefbef
+  expected_task: obb
+  source_classes: 18
+
+data:
+  yaml: configs/rareplanes_obb.yaml
+  expected_classes:
+    0: plane
+
+training:
+  task: obb
+  imgsz: 1024
+  epochs: 100
+  patience: 20
+  batch: 8
+  device: 0
+  workers: 8
+  seed: 20261001
+  deterministic: true
+  optimizer: AdamW
+  lr0: 0.002
+  lrf: 0.01
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  cos_lr: false
+  mosaic: 1.0
+  close_mosaic: 10
+  mixup: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  flipud: 0.0
+  fliplr: 0.5
+  degrees: 0.0
+  translate: 0.1
+  scale: 0.5
+  shear: 0.0
+  perspective: 0.0
+  amp: true
+  bgr: 0.0
+  cutmix: 0.0
+  copy_paste: 0.0
+  freeze: null
+  resume: false
+
+reporting:
+  primary_subset: overall_location_disjoint_val
+  snow_subset: descriptive_only_one_scene
+  use_rareplanes_test: false
+
+# Historical provenance for the completed Colab run. This block is never
+# forwarded to Ultralytics and is not a resume instruction for future runs.
+completed_run:
+  status: complete
+  run_name: rareplanes_baseline_01_full
+  execution_environment: google_colab
+  accelerator: NVIDIA Tesla T4
+  ultralytics_version: 8.4.165
+  initial_epochs_completed: 10
+  resumed_from_epoch: 11
+  resume_checkpoint:
+    source: last.pt
+    automatic: false
+    optimizer_state_preserved: true
+    only_checkpoint_change:
+      field: train_args.patience
+      value: 20
+  stopped_epoch: 79
+  best_epoch: 59
+  best_checkpoint:
+    path: rareplanes_finetuned_best.pt
+    sha256: 4111cdab67bcc3c53623e4bd08aeb5943e4a49225c27c62172036b815991eced
+  validation_metrics:
+    precision: 0.892
+    recall: 0.976
+    map50: 0.959
+    map50_95: 0.815

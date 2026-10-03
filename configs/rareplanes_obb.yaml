@@ -1,0 +1,8 @@
+# Generated RarePlanes aircraft-only OBB dataset.
+# Resolve from the repository root; no official RarePlanes TEST data is used.
+path: datasets/RarePlanes_yolo_obb
+train: images/train
+val: images/val
+
+names:
+  0: plane

@@ -1,0 +1,25 @@
+# Known-tested Windows CPU development/deployment environment.
+# This is a concise direct-dependency specification, not a machine lock file.
+name: geo-aerial
+channels:
+  - conda-forge
+dependencies:
+  # Keep the native GIS stack together under conda-forge on Windows.
+  - python=3.12.14
+  - pip=26.2.1
+  - numpy=2.5.3
+  - gdal=3.13.3
+  - rasterio=1.5.1
+  - pyproj=3.8.0
+  - shapely=2.1.2
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cpu
+      - torch==2.14.0+cpu
+      - torchvision==0.29.0+cpu
+      - ultralytics==8.4.165
+      - opencv-python==5.0.0.93
+      - PyYAML==6.0.3
+      - psutil==7.2.2
+      - matplotlib==3.11.2
+      - onnx==1.23.1
+      - onnxruntime==1.30.0
