@@ -1,0 +1,55 @@
+name: CPU tests and container
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Source whitespace check
+        run: git diff-tree --check --root HEAD -- src configs tests deploy Dockerfile compose.yaml .github
+      - name: Install Python and dependencies in test image
+        run: docker build --target test --tag geo-obb:test .
+      - name: Compile and import checks (no model)
+        run: |
+          docker run --rm geo-obb:test python -m compileall -q src tests deploy
+          docker run --rm geo-obb:test python -c "from src.api_service import app; import rasterio, pyproj, shapely, torch; assert not torch.cuda.is_available(); print(app.title)"
+      - name: Focused tests (no inference)
+        run: |
+          docker run --rm geo-obb:test python -B -m unittest discover -s tests -p test_api_service.py -v
+          docker run --rm geo-obb:test python -B -m unittest discover -s tests -p test_geospatial_inference.py -v
+          docker run --rm geo-obb:test python -B -m unittest discover -s tests -p test_temporal_aircraft_analysis.py -v
+      - name: Full unit suite (no model or dataset)
+        run: docker run --rm geo-obb:test
+      - name: Build runtime image without assets
+        run: docker build --target runtime --tag geo-obb:ci .
+      - name: Liveness and missing-model readiness
+        run: |
+          docker run -d --name geo-obb-ci -p 127.0.0.1:8000:8000 geo-obb:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/live; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8000/health/live
+          test "$(curl --silent --output /tmp/readiness.json --write-out '%{http_code}' http://127.0.0.1:8000/health/ready)" = 503
+          cat /tmp/readiness.json
+      - name: Stop local smoke container
+        if: always()
+        run: |
+          docker logs geo-obb-ci || true
+          docker rm --force geo-obb-ci || true

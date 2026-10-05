@@ -18,7 +18,12 @@ detector whose class metadata includes `plane`. This project adds:
 - global, class-aware polygon NMS;
 - GIS-ready GeoJSON output;
 - TRAIN-only RarePlanes dataset preparation and domain adaptation;
-- frozen internal validation and PyTorch/ONNX backend parity checks.
+- frozen internal validation and PyTorch/ONNX backend parity checks;
+- metric-CRS multi-temporal spatial-presence analysis;
+- a shared FastAPI inference service and non-root CPU container deployment;
+- locally validated asset-free CI (hosted Actions execution pending publication).
+
+The YOLO26 detector architecture is not an original contribution of this project.
 
 This combined source project is distributed under AGPL-3.0. The original
 detector baseline remains attributed to JustinVladut under its preserved MIT
@@ -247,6 +252,13 @@ zero-denominator policy in the evaluation code.
 | Original DOTA | 1,268 | 1,258 | 857 | 401 | 411 | 0.6812 | 0.6759 | 0.6785 | 0.6527 | 0.6371 | 0.6344 |
 | Fine-tuned | 1,268 | 1,287 | 1,251 | 36 | 17 | 0.9720 | 0.9866 | 0.9793 | 0.9487 | 0.9856 | 0.9643 |
 
+Mean matched rectangular-OBB IoU was 0.5469 for the original checkpoint and
+0.8367 after adaptation; micro F1 improved by 0.3007 (computed before rounding).
+Mean matched IoU excludes
+unmatched objects and is not an all-GT coverage metric. These are internal
+validation results: this split also governed training early stopping, so it is
+not an independent final generalization test.
+
 The validation set contains only one snow scene with 17 aircraft. Its 17/17
 fine-tuned result is descriptive only. It is insufficient to claim reliable
 snow generalization. Official RarePlanes TEST performance remains unknown.
@@ -308,7 +320,232 @@ the source COG as a raster. Polygon orientation, confidence, tile provenance,
 scene-edge behavior, and suppression decisions can then be inspected in their
 geographic context.
 
-## 12. Reproducibility boundaries
+## 12. Multi-temporal aircraft activity analysis
+
+The optional temporal layer consumes final per-scene prediction GeoJSON for
+two or more timestamped acquisitions of the same location. The first frozen
+internal-VAL demonstration location is selected without detector results:
+eligible inputs must be RarePlanes TRAIN scenes from one frozen validation
+location, have authoritative acquisition timestamps and valid georeferencing,
+and contain at least two acquisitions. Selection maximizes acquisition count,
+then temporal span, with location ID only as a deterministic final tie-break.
+
+Geographic polygons remain in CRS84 for output, but all matching geometry is
+projected with `always_xy=True` into the local UTM zone (or a local azimuthal
+equidistant fallback outside UTM latitude coverage). Consecutive timestamps
+are associated by deterministic global greedy one-to-one assignment. Eligible
+pairs must be within a maximum metric distance, and their transparent cost is:
+
+```text
+0.70 * (1 - projected polygon IoU)
+  + 0.30 * (centroid distance / maximum correspondence distance)
+```
+
+Unless explicitly supplied, the maximum distance is the larger of 50 metres
+or twice the median detected OBB major axis. The persistent-position boundary
+is the larger of 15 metres or half the median major axis, capped by the maximum
+distance. These conservative, geometry-scaled values are configurable analysis
+parameters; they were not tuned against RarePlanes ground truth and they do
+not change detector confidence, model IoU, boundary filtering, or global NMS.
+
+Matched presence is described as `persistent` or `displaced`; unmatched later
+and earlier detections are described as `appeared` and `disappeared`
+respectively. For three or more acquisitions, a simple 100-metre metric grid
+aggregates detection-centroid events for interpretable GIS inspection. This is
+descriptive spatial activity analysis, not a statistical hotspot test.
+
+**This workflow measures changes in detected spatial aircraft presence; it
+does not establish physical aircraft identity across acquisitions.** Results
+inherit detector false positives, false negatives, georegistration error,
+viewing-condition changes, and the ambiguity of spatially dense parking areas.
+
+Outputs are RFC 7946 GeoJSON for QGIS: all timestamp detections,
+correspondence LineStrings, appeared/disappeared polygons, and an optional
+activity grid, plus JSON and CSV summaries. Compatible prior scene inference
+is reused only when its summary proves the frozen production policy; missing
+selected scenes require the externally supplied checkpoint with its verified
+SHA-256 and are run through the unchanged production inference pipeline.
+
+### Frozen internal-validation demonstration
+
+The metadata-only rule selected location 84 from four repeated-location
+candidates: locations 10, 23, 84, and 108 had 2, 2, 3, and 2 acquisitions.
+Location 84's authoritative timestamps were 2017-01-30 16:12 UTC,
+2019-01-14 16:35 UTC, and 2019-03-10 16:11 UTC, spanning 66,441,540 seconds
+(about 769 days). All three pre-existing inference outputs were reused after
+their summaries and paired-run provenance confirmed the fine-tuned checkpoint,
+fixed inference settings, and strict production boundary policy.
+
+The local metric CRS was EPSG:32617. The detected median OBB major axis was
+18.418 m, so the untuned geometry-derived floors governed: maximum
+correspondence distance 50 m and persistent-position distance 15 m. Counts
+were `149 -> 166 -> 188`. The first pair produced 103 correspondences
+(74 persistent, 29 displaced), 63 appeared presences, and 46 disappeared
+presences; mean/median/max displacement was 12.685/5.728/49.877 m. The second
+pair produced 116 correspondences (95 persistent, 21 displaced), 72 appeared,
+and 50 disappeared; displacement was 9.937/6.184/47.829 m. Mean projected
+polygon IoU was 0.371 and 0.353 respectively. Both pair-wise count-conservation
+identities held.
+
+The descriptive 100 m activity grid contained 130 occupied cells. Its highest
+observed cell contained 29 detection events across all three timestamps. All
+503 detection polygons, 219 correspondence lines, 231 appeared/disappeared
+polygons, and 130 grid polygons passed finite-coordinate, geometry-type,
+validity, property-provenance, and CRS84 range checks.
+
+These figures are **model-derived temporal spatial analysis, not
+identity-ground-truth evaluation**. They do not establish that corresponding
+presences are the same physical aircraft or that appeared/disappeared presence
+represents a confirmed arrival or departure.
+
+## 13. FastAPI geospatial inference service
+
+The optional service layer in `src/api_service.py` calls the same
+`load_obb_model` and `process_raster_scene` functions as the command-line
+workflow. The service therefore preserves the validated tile generation,
+boundary rejection, full-scene coordinate reconstruction, polygon NMS, CRS84
+conversion, and GeoJSON serialization instead of maintaining a second model
+pipeline.
+
+Configuration is read at process startup from `GEO_OBB_MODEL_PATH`, optional
+`GEO_OBB_MODEL_SHA256`, `GEO_OBB_BACKEND`, `GEO_OBB_DEVICE`, and
+`GEO_OBB_MAX_UPLOAD_BYTES`. The model is loaded lazily on the first readiness,
+metadata, or inference request and then reused. Initialization and inference
+have separate locks; model/GDAL inference is deliberately serialized because
+this milestone validates correctness for a local service, not concurrent
+throughput. Blocking raster validation and inference run in the ASGI thread
+pool, allowing the event loop to continue serving requests. Both `.pt` and
+`.onnx` backends are accepted through the existing
+Ultralytics loader when their metadata describes a compatible OBB model with
+the requested target class.
+
+`/health/live` is independent of model availability. `/health/ready` verifies
+the configured file, optional SHA-256, OBB metadata, and target class.
+`/model` returns only a filename, digest, backend, class metadata, and frozen
+settings; it does not expose the absolute checkpoint path. `/infer` accepts a
+multipart GeoTIFF upload and returns scene metadata, the existing inference
+summary counts/timing, and the final RFC 7946-style FeatureCollection.
+
+Uploads are restricted to `.tif`/`.tiff` and known TIFF media types, streamed
+in bounded chunks under a server-generated temporary filename, capped at 512
+MiB by default, validated as three-band uint8 GeoTIFFs with a non-identity
+affine transform and CRS, and removed with the entire temporary workspace when
+the request finishes. Client filenames are used only as sanitized response
+metadata. Expected failures are mapped to classified HTTP errors without
+tracebacks or internal filesystem paths.
+
+The upload limit is enforced while copying Starlette's parsed `UploadFile`
+into the request workspace. Multipart parsing can spool input before this
+application-level check; production deployment also needs an ingress body
+limit and temporary-storage quota. This limit alone does not bound raster
+dimensions or inference duration.
+
+### Local service parity check
+
+One frozen internal TRAIN-derived validation scene,
+`108_1040010049B46C00` (4364 x 3360), was processed through both the existing
+CLI and the loopback API using the verified fine-tuned checkpoint and identical
+frozen settings. Both processed 24 windows and returned 171 raw plane
+candidates, 5 boundary rejections, 166 pre-NMS candidates, 34 suppressions, and
+132 final polygons. Polygon coordinates and confidences matched exactly, and
+all inference counts matched. All 132 API geometries passed the shared
+finite-coordinate, validity, CRS84 range, confidence, and footprint checks.
+The API deliberately uses a server-controlled `input` scene stem, so scene,
+detection, and source-tile identifiers differ from the CLI's original scene
+stem; the sanitized client filename is retained separately. Other feature
+properties matched. API scene processing took 23.26 seconds after readiness
+had loaded the model; the CLI's 74.07-second total included model loading and
+had different initialization/cache conditions. These timings are smoke-test
+observations, not a service-versus-CLI performance claim. No accuracy tuning
+or official RarePlanes TEST access was involved.
+
+The API is intentionally scoped to loopback/local portfolio deployment. A
+public production deployment still needs authentication and authorization,
+TLS termination, rate limiting, request/process isolation, resource limits,
+observability, health supervision, and a deliberate multi-worker model-memory
+strategy. The temporal analysis module remains an offline workflow; a future
+`POST /temporal-analysis` could wrap it after defining its multi-file upload
+and long-running job semantics.
+
+## 14. Container deployment and CI
+
+The Dockerfile uses a digest-pinned `mambaorg/micromamba:2.9.0` Debian 13 base.
+`deploy/environment.container.yml` keeps Python 3.12 and GDAL/Rasterio,
+PyProj, Shapely, and NumPy together under conda-forge. Explicit CPU PyTorch
+and the application dependencies are recorded separately in
+`deploy/requirements.container.txt`. These are direct reference pins, not a
+complete transitive lock. The existing `environment.yml` remains the tested
+Windows reference. Micromamba's inherited entrypoint activates the environment
+for commands; build-time activation is explicitly enabled as described in the
+[Micromamba container documentation](https://micromamba-docker.readthedocs.io/en/stable/quick_start.html).
+
+The runtime runs as `mambauser`, uses one Uvicorn worker, and listens on
+`0.0.0.0:${PORT}` inside the container. `deploy/serve.py` validates the numeric
+port without shell interpolation. The stdlib-only Docker healthcheck probes
+`/health/live` independently of checkpoint readiness. Models are never loaded
+at application import, so a model-free container can start normally and return
+HTTP 503 from `/health/ready`.
+
+The strict `.dockerignore` removes Git state, credentials/configuration,
+models, original/generated datasets, outputs, caches, environments, and
+historical visual artifacts from the build context. Explicit `COPY` statements
+provide an additional inclusion boundary. The runtime image contains source,
+configuration, documentation, and dependency libraries; tests are included
+only in the separate `test` target. No checkpoint is downloaded by the build.
+
+The Docker-reported runtime size was about 3.44 GB before final hardening and
+about 3.20 GB after safe package-cache cleanup. `micromamba clean --all` had
+retained roughly 551 MB of logical extracted-cache files, many hardlinked to
+the installed environment. The build now verifies that no environment symlink
+depends on `/opt/conda/pkgs`, then removes that cache in the installation layer
+with `--force-pkgs-dirs`. The resulting image has no retained conda package
+cache; pip already uses `--no-cache-dir`. Logical cache bytes are not one-for-one
+image savings because of hardlinks and layer representation.
+
+The remaining footprint is principally the scientific stack: the installed
+Torch package is about 766 MB, Polars' runtime about 180 MB, OpenCV's Python
+module plus bundled libraries about 196 MB, and non-site-package conda libraries
+about 344 MB. System OpenGL/GLib dependencies also contribute. Project files
+are only about 1.7 MB and runtime tests are not copied. The small TestClient
+dependency is intentionally shared with the test target; removing required
+libraries or replacing the validated native stack solely for size was avoided.
+Core GIS/ML versions remained identical after cleanup; imports, unit tests,
+and no-model startup checks validate the rebuilt environment without repeating
+the expensive already-validated scene inference.
+
+`compose.yaml` mounts only the user-specified model file read-only, rejects a
+missing host file rather than creating a directory, publishes the API on host
+loopback, drops Linux capabilities, enables `no-new-privileges`, and uses a
+read-only root filesystem with a bounded writable `/tmp`. The host imagery
+is submitted as an HTTP upload and is not mounted into the service. Larger
+uploads may need a reviewed temporary-memory quota; the multipart parser and
+application workspace can both consume temporary storage.
+
+GitHub Actions runs on pull requests and pushes to `main`. It builds the
+`test` image, checks compilation/imports and CPU availability, runs API,
+geospatial inference, temporal, and full unit suites, then builds the runtime
+target and verifies model-free liveness/readiness. It uses read-only repository
+permissions and does not persist checkout credentials. The workflow requires
+package/base-image downloads but no dataset, checkpoint, model download, GPU,
+or private secret. It neither trains nor runs real model inference. The workflow
+is locally validated through its Docker/test commands; a hosted Actions run
+requires a later publication of the workflow.
+
+Local container validation used the external read-only fine-tuned PT model and
+TRAIN-derived frozen-VAL scene `108_1040010049B46C00`: 24 windows, 171 raw plane
+candidates, 5 boundary rejections, 166 pre-NMS candidates, 34 suppressions, and
+132 final features, exactly matching the saved native API/CLI counts and
+non-runtime summary fields. All 132 polygons were valid and within the raster
+footprint. Native API versus Linux container differences were bounded by
+`2.0605739337042905e-10` degrees per coordinate, `6.103515625e-5` pixels per
+vertex component, and `4.172325134277344e-7` confidence; minimum corresponding
+polygon IoU was `0.9999932959531665`. This is numerical parity, not bitwise
+identity or a speed benchmark. The local native and asset-free container suites
+each ran 194 tests with one intentional skip. The optional ONNX container
+smoke was not performed because the existing external ONNX artifact was not
+readable under the current filesystem permissions; no permissions were changed.
+
+## 15. Reproducibility boundaries
 
 The known-good environment is Python 3.12.14, Ultralytics 8.4.165, PyTorch
 2.14.0+cpu, torchvision 0.29.0+cpu, NumPy 2.5.3, Rasterio 1.5.1 with GDAL

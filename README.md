@@ -1,11 +1,15 @@
 # Geo-Aware Aerial Object Detection
 
-An engineering project for running oriented-object detection on large,
-georeferenced aerial rasters and returning GIS-ready aircraft polygons. It
-builds a geospatial and RarePlanes domain-adaptation workflow around a
-pretrained DOTA OBB detector baseline, adding deterministic raster tiling,
-full-scene coordinate recovery, polygon deduplication, evaluation, and ONNX
-Runtime deployment.
+An end-to-end geospatial aerial-intelligence pipeline: large GeoTIFF/COG scenes
+become oriented aircraft polygons, GIS-ready outputs, and multi-temporal spatial
+activity layers through a shared CLI/FastAPI inference core with CPU Docker
+deployment. It extends a pretrained DOTA OBB baseline with geospatial engineering,
+RarePlanes domain adaptation, rigorous internal validation, and ONNX parity.
+
+The contribution is the surrounding geospatial, evaluation, temporal, and
+deployment system, **not a new YOLO26 detector architecture**. The detector
+starting point is credited to
+[JustinVladut/YOLO26-DOTA-v2](https://github.com/JustinVladut/YOLO26-DOTA-v2).
 
 The central problem is that aerial scenes are much larger than a detector's
 input tensor. Predictions made independently on overlapping tiles must be
@@ -17,6 +21,29 @@ This repository reports internal RarePlanes validation results. The official
 RarePlanes TEST split has not been used. The results therefore do not claim
 official benchmark performance or broad snow-domain generalization.
 
+## Results at a glance
+
+**RarePlanes frozen internal validation**: 17 scenes from 12 location-disjoint
+TRAIN locations, fixed inference/matching settings; not official TEST results.
+
+| Model | Micro precision | Micro recall | Micro F1 | Mean matched OBB IoU |
+|---|---:|---:|---:|---:|
+| Original DOTA OBB | 0.6812 | 0.6759 | 0.6785 | 0.5469 |
+| RarePlanes-adapted | 0.9720 | 0.9866 | 0.9793 | 0.8367 |
+
+Micro F1 improved by **0.3007**, computed from unrounded aggregate counts.
+Mean IoU describes matched true positives,
+not unmatched aircraft; validation was also used for training early stopping.
+
+| Engineering evidence | Verified outcome |
+|---|---|
+| Temporal spatial presence, location 84 | 3 acquisitions over ~769 days; `149 -> 166 -> 188` detections; 219 correspondences: 169 persistent, 50 displaced |
+| Native/container deployment parity | 132 final detections in both; maximum coordinate difference `2.061e-10` degrees and confidence difference `4.173e-7` |
+| ONNX CPU parity | 23/23 full-scene final polygons matched on one bounded validation scene |
+
+Temporal correspondence is **not physical aircraft identity tracking**.
+Full protocols and numerical limits are in [the methodology](docs/METHODOLOGY.md).
+
 ## What this project adds
 
 | Scope | Contents |
@@ -24,23 +51,28 @@ official benchmark performance or broad snow-domain generalization.
 | Detector starting point | Pretrained 18-class DOTA OBB model, its identity and historical training/result evidence |
 | Geospatial engineering | COG windowing, OBB pixel/world transforms, strict boundary handling, cross-tile polygon NMS, and GeoJSON/QGIS output |
 | Domain adaptation and validation | RarePlanes preparation and diagnosis, one-class fine-tuning, location-disjoint validation, full-scene evaluation, and reproducible provenance |
-| Deployment work | Fixed-shape ONNX export plus chip-level and full-scene PyTorch/ONNX Runtime CPU parity validation |
+| Temporal spatial analysis | Metric-CRS correspondence and change/activity layers across acquisitions, without claiming aircraft identity |
+| Deployment work | ONNX parity, shared CLI/FastAPI core, non-root CPU Docker, external model mounts, and asset-free CI validation |
 
 Historical DOTA utilities and result assets remain for provenance, but they
 are not the current RarePlanes geospatial workflow.
 
 ## Pipeline
 
-```text
-GeoTIFF / COG
-  -> deterministic overlapping Rasterio windows
-  -> YOLO OBB inference (PyTorch or ONNX Runtime)
-  -> tile-local four-corner polygons
-  -> full-scene pixel polygons
-  -> strict valid-region filtering
-  -> class-aware polygon-IoU NMS
-  -> affine transform and CRS conversion
-  -> RFC 7946 GeoJSON in OGC:CRS84 longitude/latitude
+```mermaid
+flowchart TD
+    Raster[GeoTIFF / COG] --> Tiles[Windowed spatial tiling]
+    Tiles --> Detector[OBB detector: PyTorch or ONNX CPU]
+    Detector --> Scene[Tile-local to full-scene pixels]
+    Scene --> Filter[Strict boundary filtering and polygon NMS]
+    Filter --> CRS[Affine transform to CRS84 longitude / latitude]
+    CRS --> GeoJSON[GIS-ready GeoJSON]
+    GeoJSON --> QGIS[QGIS visualization]
+    GeoJSON --> Temporal[Multi-acquisition metric spatial analysis]
+    Temporal --> Activity[Presence changes and activity layers]
+    CLI[CLI] -. shared inference core .-> Tiles
+    API[FastAPI] -. shared inference core .-> Tiles
+    Runtime[Native or non-root Docker CPU runtime] -. hosts .-> Detector
 ```
 
 Key behavior:
@@ -120,10 +152,10 @@ one-to-one polygon matching at IoU 0.50. GT diamonds were converted to
 minimum-area rectangles for the official OBB metrics; original-diamond
 comparisons remain diagnostic only.
 
-| Model | GT | Predictions | TP | FP | FN | Micro P | Micro R | Micro F1 | Macro P | Macro R | Macro F1 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Original DOTA OBB | 1,268 | 1,258 | 857 | 401 | 411 | 0.6812 | 0.6759 | 0.6785 | 0.6527 | 0.6371 | 0.6344 |
-| RarePlanes fine-tuned | 1,268 | 1,287 | 1,251 | 36 | 17 | 0.9720 | 0.9866 | 0.9793 | 0.9487 | 0.9856 | 0.9643 |
+The 1,268 GT aircraft yielded `857 TP / 401 FP / 411 FN` for the original
+checkpoint and `1,251 TP / 36 FP / 17 FN` after adaptation. The compact
+comparison is [above](#results-at-a-glance); full counts and scene-macro metrics
+are in [Methodology Section 9](docs/METHODOLOGY.md#9-frozen-full-scene-evaluation).
 
 The validation set contains only one snow scene and 17 snow-scene aircraft;
 the fine-tuned model detected 17/17 there. That is descriptive and is not
@@ -180,10 +212,8 @@ Run all commands from the repository root.
 
 ### 1. Clone and create the tested environment
 
-Replace the placeholder URL after the public repository is created:
-
 ```powershell
-git clone <public-repository-url> geo-aware-aerial-obb
+git clone https://github.com/Debjyoti-G77/geo-aware-aerial-obb.git
 cd geo-aware-aerial-obb
 conda env create -f environment.yml
 conda run -n geo-aerial python -m pip check
@@ -229,8 +259,9 @@ best.pt                         # original 18-class DOTA OBB checkpoint
 rareplanes_finetuned_best.pt   # completed one-class project checkpoint
 ```
 
-These files are not included in Git. Release hosting for these binaries should
-be provided separately from the source repository. Verify them before use:
+These files are not included in Git, and no project-hosted checkpoint download
+is currently provided. Obtain trusted checkpoints separately under their
+applicable terms, and verify their identity before use:
 
 ```powershell
 Get-FileHash best.pt -Algorithm SHA256
@@ -238,6 +269,25 @@ Get-FileHash rareplanes_finetuned_best.pt -Algorithm SHA256
 ```
 
 Expected hashes are listed under [Reproducibility hashes](#reproducibility-hashes).
+
+### Minimal inference quickstart (no training preparation required)
+
+After environment setup, supply a trusted compatible OBB checkpoint and a
+three-band uint8 georeferenced raster. You do **not** need to generate a training
+dataset to run inference:
+
+```powershell
+conda run -n geo-aerial python src/geospatial_inference.py `
+  --model path/to/model.pt --input path/to/scene.tif `
+  --output outputs/quickstart --target-class plane --device cpu
+```
+
+Load `outputs/quickstart/predictions.geojson` in QGIS. Alternatively use the
+[FastAPI service](#fastapi-service) or [container deployment](#container-deployment)
+below. The fine-tuned checkpoint is **not currently distributed by this source
+repository**; hashes establish identity but are not download links. Readiness
+without a model is deliberately HTTP 503, not a broken installation. Only load
+checkpoints from trusted sources: a matching hash does not establish safety.
 
 ### 3. Prepare the RarePlanes YOLO OBB dataset
 
@@ -335,6 +385,11 @@ TRAIN annotation. The preparation manifest identifies the frozen internal
 validation scenes; official RarePlanes TEST is not used.
 
 ```powershell
+conda run -n geo-aerial python src/geospatial_inference.py `
+  --input datasets/RarePlanes/train/imagery/PS-RGB_cog/7_104001002D43CF00.tif `
+  --output outputs/geospatial_inference/rareplanes_val_7 `
+  --model rareplanes_finetuned_best.pt --target-class plane --device cpu
+
 conda run -n geo-aerial python src/geospatial_evaluation.py `
   --predictions outputs/geospatial_inference/rareplanes_val_7/predictions.geojson `
   --ground-truth datasets/RarePlanes/train/annotations/geojson_aircraft/7_104001002D43CF00.geojson `
@@ -366,6 +421,127 @@ In QGIS, use **Layer > Add Layer > Add Vector Layer** to load
 inspect polygon orientation, confidence, scene/tile provenance, edge behavior,
 and duplicate suppression in geographic context.
 
+## FastAPI service
+
+`src/api_service.py` exposes the same validated full-scene pipeline as a local
+HTTP service; it does not implement a separate inference path. The checkpoint
+stays outside Git and is configured at runtime. For example, in PowerShell:
+
+```powershell
+$env:GEO_OBB_MODEL_PATH = (Resolve-Path "path/to/rareplanes_finetuned_best.pt").Path
+$env:GEO_OBB_MODEL_SHA256 = "4111cdab67bcc3c53623e4bd08aeb5943e4a49225c27c62172036b815991eced"
+$env:GEO_OBB_BACKEND = "pt"
+$env:GEO_OBB_DEVICE = "cpu"
+conda run -n geo-aerial python -m uvicorn src.api_service:app --host 127.0.0.1 --port 8000
+```
+
+On POSIX shells, export the same four variables before running the `uvicorn`
+command. The endpoints are:
+
+- `GET /health/live`: process liveness without loading the model;
+- `GET /health/ready`: checkpoint hash, OBB metadata, and target-class readiness;
+- `GET /model`: non-sensitive deployment metadata and frozen inference settings;
+- `POST /infer`: multipart `file` upload of a georeferenced RGB uint8 GeoTIFF/COG.
+
+```bash
+curl -X POST http://127.0.0.1:8000/infer \
+  -F "file=@scene.tif;type=image/tiff" \
+  -o inference-response.json
+```
+
+The response contains raster metadata, inference counts/timing, and an RFC
+7946-style CRS84 GeoJSON FeatureCollection ready for GIS use. Uploads are
+streamed with a configurable 512 MiB default limit
+(`GEO_OBB_MAX_UPLOAD_BYTES`), stored under a server-controlled temporary name,
+and removed after the request. Inference is serialized while one lazily loaded
+model is reused. This is a local/portfolio deployment boundary, not a hardened
+public service: internet exposure would additionally require authentication,
+authorization, TLS, rate limiting, request isolation, observability, and
+resource/process supervision. Temporal analysis remains a separate offline
+workflow, not an API endpoint.
+
+## Container deployment
+
+The CPU image keeps the Linux GIS stack together under conda-forge and uses
+explicit CPU PyTorch wheels. Models and datasets are excluded from the build.
+Build from the repository root, then configure an existing external checkpoint:
+
+```powershell
+docker build --tag geo-aware-aerial-obb:local .
+$env:MODEL_FILE = (Resolve-Path "path/to/rareplanes_finetuned_best.pt").Path
+$env:GEO_OBB_MODEL_SHA256 = "4111cdab67bcc3c53623e4bd08aeb5943e4a49225c27c62172036b815991eced"
+docker compose up --detach
+```
+
+On POSIX shells, use `export MODEL_FILE=/absolute/path/to/model.pt` and export
+the digest before the same Compose command. Compose mounts that one file
+**read-only** at `/models/rareplanes_finetuned_best.pt` and supplies
+`GEO_OBB_MODEL_PATH`, `GEO_OBB_MODEL_SHA256`, `GEO_OBB_BACKEND=auto`, and
+`GEO_OBB_DEVICE=cpu`. Model binaries intentionally remain external.
+
+The service runs as a non-root user, binds to `0.0.0.0` inside the container,
+and is published only on host loopback by default:
+
+```bash
+curl http://127.0.0.1:8000/health/live
+curl http://127.0.0.1:8000/health/ready
+curl http://127.0.0.1:8000/model
+curl -X POST http://127.0.0.1:8000/infer \
+  -F "file=@scene.tif;type=image/tiff" -o inference-response.json
+docker compose down
+```
+
+In Windows PowerShell, use `curl.exe` for these examples. `HOST_PORT` controls
+the published port and `PORT` the internal port (both default to 8000).
+`GEO_OBB_MAX_UPLOAD_BYTES` controls the application upload limit. For ONNX,
+set `MODEL_FILENAME` to an `.onnx` filename and supply that artifact's digest.
+Docker's healthcheck uses `/health/live`; missing models leave liveness healthy
+and readiness at HTTP 503. `.github/workflows/ci.yml` builds the same dependency
+image, checks imports, runs focused/full tests, builds the runtime image, and
+checks no-model health behavior without model inference, datasets, or GPU.
+The workflow is locally validated; hosted Actions execution is pending publication.
+The local-service deployment limitations above still apply.
+
+## Multi-temporal aircraft activity analysis
+
+`src/temporal_aircraft_analysis.py` compares predictions from two or more
+timestamped images of the same location. It automatically uses a local metric
+CRS for polygon overlap and centroid-distance calculations, creates
+deterministic one-to-one spatial correspondences between consecutive
+acquisitions, and classifies detected presence as persistent, displaced,
+appeared, or disappeared. With three or more timestamps it also produces a
+simple metric-grid activity aggregation.
+
+The default frozen-VAL workflow selects a repeated TRAIN location using only
+metadata and raster georeferencing: maximum acquisition count, then maximum
+temporal span, then lowest location ID. Compatible existing fixed-policy
+inference outputs are reused; only missing selected scenes are inferred. A
+portable explicit manifest can also be supplied:
+
+```powershell
+conda run -n geo-aerial python src/temporal_aircraft_analysis.py `
+  --manifest path/to/temporal_manifest.csv `
+  --output outputs/temporal_analysis
+```
+
+The manifest columns are `location_id`, `scene_id`, `acquisition_time`,
+`predictions_path`, and optional `raster_path`. Outputs include temporal
+detection polygons, correspondence lines, appeared/disappeared polygons,
+JSON/CSV summaries, and—when at least three timestamps exist—an activity-grid
+GeoJSON. All geographic outputs use RFC 7946 longitude/latitude semantics and
+can be loaded directly into QGIS.
+
+**This workflow measures changes in detected spatial aircraft presence; it
+does not establish physical aircraft identity across acquisitions.** The
+correspondence distance and persistent-position boundary are documented
+analysis parameters, not detector thresholds and not ground-truth-tuned
+tracking parameters.
+
+The location-84 demonstration in the results table used three acquisitions
+from 2017-01-30 to 2019-03-10. Its 130-cell activity grid and all temporal layers
+passed geometry and CRS84 validation. Per-pair details and correspondence
+parameters are in [Methodology Section 12](docs/METHODOLOGY.md#12-multi-temporal-aircraft-activity-analysis).
+
 ## Reproducibility hashes
 
 | Artifact | SHA-256 |
@@ -381,11 +557,16 @@ configs/                         portable runtime, dataset, and training recipes
 environment.yml                 exact known-tested Windows CPU environment
 src/geospatial_tiling.py         deterministic windows and coordinate transforms
 src/geospatial_inference.py      PyTorch/ONNX full-scene inference and GeoJSON
+src/api_service.py               local FastAPI wrapper around geospatial inference
 src/geospatial_evaluation.py     polygon-IoU evaluation
+src/temporal_aircraft_analysis.py same-location temporal activity analysis
 src/prepare_rareplanes_obb.py    TRAIN-only OBB dataset preparation
 src/low_confidence_probe.py      pre-adaptation response diagnostic
 src/train_rareplanes_obb.py      explicit training/readiness launcher
 src/export_rareplanes_onnx.py    fixed-shape ONNX export and parity validation
+Dockerfile / compose.yaml        CPU service build and external-model startup
+deploy/                          Linux reference pins, launcher, liveness probe
+.github/workflows/ci.yml          asset-free unit and container validation
 tests/                           deterministic unit and integration tests
 docs/METHODOLOGY.md              detailed experimental protocol and limitations
 ```
@@ -399,6 +580,11 @@ workflow. `src/benchmark_edge.py`, `src/analyze_edge_results.py`,
 are retained DOTA baseline evidence. Their desktop proxy edge study
 must not be confused with this project's validated RarePlanes ONNX Runtime CPU
 parity check.
+
+The historical chart/benchmark scripts are working-directory-dependent and
+execute at import; they are retained evidence, not supported service entry
+points. Desktop execution-provider proxies do not establish Jetson/Raspberry
+Pi performance or device-specific latency bounds.
 
 ## Credits, license, and attribution
 

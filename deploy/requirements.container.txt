@@ -1,0 +1,15 @@
+# Direct Linux reference pins; CPU wheels are explicit, CUDA wheels are excluded.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0+cpu
+torchvision==0.29.0+cpu
+ultralytics==8.4.165
+opencv-python==5.0.0.93
+PyYAML==6.0.3
+psutil==7.2.2
+matplotlib==3.11.2
+onnx==1.23.1
+onnxruntime==1.30.0
+fastapi==0.142.2
+uvicorn==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1

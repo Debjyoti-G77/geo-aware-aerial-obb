@@ -5,7 +5,8 @@ benchmark_edge.py — ONNX inference-speed study (edge-deployment PROXY)
 
 IMPORTANT: this measures inference speed on the DESKTOP it runs on, using ONNX
 Runtime execution providers as stand-ins for edge devices. It does NOT run on a
-physical Jetson or Raspberry Pi. Results are indicative upper bounds:
+physical Jetson or Raspberry Pi. These are desktop-only proxy timings, not
+device-specific measurements or performance bounds:
   - CUDAExecutionProvider  -> stands in for a Jetson-class GPU
   - CPUExecutionProvider   -> stands in for a Pi-class CPU (4 threads)
 

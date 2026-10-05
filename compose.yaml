@@ -1,0 +1,30 @@
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: geo-aware-aerial-obb:local
+    init: true
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8000}:${PORT:-8000}"
+    environment:
+      PORT: "${PORT:-8000}"
+      GEO_OBB_MODEL_PATH: "/models/${MODEL_FILENAME:-rareplanes_finetuned_best.pt}"
+      GEO_OBB_MODEL_SHA256: "${GEO_OBB_MODEL_SHA256:-4111cdab67bcc3c53623e4bd08aeb5943e4a49225c27c62172036b815991eced}"
+      GEO_OBB_BACKEND: "${GEO_OBB_BACKEND:-auto}"
+      GEO_OBB_DEVICE: cpu
+      GEO_OBB_MAX_UPLOAD_BYTES: "${GEO_OBB_MAX_UPLOAD_BYTES:-536870912}"
+    volumes:
+      - type: bind
+        source: "${MODEL_FILE:?Set MODEL_FILE to an existing external model file}"
+        target: "/models/${MODEL_FILENAME:-rareplanes_finetuned_best.pt}"
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=1536m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

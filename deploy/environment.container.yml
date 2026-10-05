@@ -1,0 +1,12 @@
+# Linux CPU deployment reference. The Windows reference remains environment.yml.
+name: base
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.14
+  - pip=26.2.1
+  - numpy=2.5.3
+  - gdal=3.13.3
+  - rasterio=1.5.1
+  - pyproj=3.8.0
+  - shapely=2.1.2

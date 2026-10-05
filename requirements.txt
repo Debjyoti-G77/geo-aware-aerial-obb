@@ -18,3 +18,9 @@ shapely>=2.1
 
 # Plotting
 matplotlib>=3.8
+
+# Local geospatial inference API
+fastapi>=0.142,<1.0
+uvicorn>=0.54,<1.0
+python-multipart>=0.0.32,<1.0
+httpx>=0.28,<1.0             # FastAPI TestClient
